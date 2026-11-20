@@ -305,6 +305,10 @@ document.body.insertAdjacentHTML("afterbegin",`
    <p class="hint">These fill the Payment Status drop-down on the Reservation form. Add, edit or remove options, then save. Bookings that already use a removed option keep it.</p>
    <div id="payOptList"></div>
    <div class="btns"><button class="b ghost" type="button" id="payOptAdd">+ Add option</button><button class="b pri" type="button" id="payOptSave">Save payment options</button><button class="b ghost" type="button" id="payOptReset">Reset to default</button></div>
+   <div id="memSec" style="display:none"><h2 style="margin-top:26px">Member access</h2>
+   <p class="hint">People who create an account wait here until you approve them. Approve lets them in; Remove cuts their access.</p>
+   <div id="memList" class="hint">Loading…</div>
+   <div class="btns"><button class="b ghost" type="button" id="memRefresh">Refresh list</button></div></div>
    <h2 style="margin-top:26px">Backup &amp; import</h2>
    <p class="hint">Copy all bookings and settings as text (a backup), or paste a backup here to restore it. Importing replaces everything.</p>
    <div class="btns"><button class="b ghost" type="button" id="expJson">Show backup text</button></div>
@@ -318,9 +322,14 @@ document.body.insertAdjacentHTML("afterbegin",`
 </main>
 <div class="tip" id="tip"></div>
 <div class="toast" id="toast"></div>
-<div class="modal" id="login" style="z-index:60"><div class="card"><h2>Staff sign-in</h2><p class="hint">Gala Dinner reservations are private. Sign in with the staff email and password.</p>
+<div class="modal" id="login" style="z-index:60"><div class="card"><h2 id="lgTitle">Member sign-in</h2><p class="hint" id="lgHint">Gala Dinner reservations are private. Sign in with your own email and password.</p>
+ <label id="lgNameRow" style="display:none">Full name<input id="lgName" type="text" autocomplete="name"></label>
  <label>Email<input id="lgEmail" type="email" autocomplete="username"></label><label>Password<input id="lgPw" type="password" autocomplete="current-password"></label>
- <div class="btns"><button class="b pri" type="button" id="lgGo">Sign in</button></div><div id="lgErr" style="color:var(--red);font-weight:600;min-height:18px;margin-top:8px"></div></div></div>
+ <label id="lgPw2Row" style="display:none">Confirm password<input id="lgPw2" type="password" autocomplete="new-password"></label>
+ <div class="btns"><button class="b pri" type="button" id="lgGo">Sign in</button></div><div id="lgErr" style="color:var(--red);font-weight:600;min-height:18px;margin-top:8px"></div>
+ <p style="margin:10px 0 0;font-size:13px"><a href="#" id="lgSwap">New here? Create an account</a> &nbsp;·&nbsp; <a href="#" id="lgForgot">Forgot password?</a></p></div></div>
+<div class="modal" id="pending" style="z-index:61"><div class="card"><h2>Waiting for approval</h2><p class="hint" id="pendMsg"></p>
+ <div class="btns"><button class="b pri" type="button" id="pendCheck">Check again</button><button class="b ghost" type="button" id="pendOut">Sign out</button></div></div></div>
 <div class="modal" id="modal"><div class="card"><h2 id="mT"></h2><p class="hint" id="mB"></p><div class="btns" id="mBtns"></div></div></div>
 `);
 
@@ -595,7 +604,7 @@ $("#regQ").addEventListener("input",()=>renderRegister());
 /* setup (administrator only) */
 function applyAdmin(){
   $("#adminLock").style.display=unlocked?"none":"";$("#adminBody").style.display=unlocked?"":"none";
-  if(unlocked)renderSetup();else{$("#adminErr").textContent="";$("#adminPin").value=""}
+  if(unlocked){renderSetup();if(FB)memLoad()}else{$("#adminErr").textContent="";$("#adminPin").value=""}
 }
 const guard=()=>{if(unlocked)return true;toast("Administrator PIN required");go("setup");return false};
 let pinFails=0,pinWait=0;
@@ -699,6 +708,21 @@ async function fbSignIn(email,pw){
   const j=await r.json();if(!r.ok)throw new Error((j.error&&j.error.message)||"sign-in failed");
   saveAuth({email:j.email,refresh:j.refreshToken,id:j.idToken,exp:Date.now()+(Math.max(60,+j.expiresIn)-60)*1000});
 }
+const COL_M="gala2027_members",COL_R="gala2027_requests";
+async function idt(method,body){
+  const r=await fetch("https://identitytoolkit.googleapis.com/v1/accounts:"+method+"?key="+encodeURIComponent(FB.apiKey),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  const j=await r.json();if(!r.ok)throw new Error((j.error&&j.error.message)||"failed");return j}
+async function fbSignUp(email,pw,name){
+  const j=await idt("signUp",{email,password:pw,returnSecureToken:true});
+  saveAuth({email:j.email,refresh:j.refreshToken,id:j.idToken,exp:Date.now()+(Math.max(60,+j.expiresIn)-60)*1000});
+  try{await fbPutRequest(name)}catch(e){}
+}
+const emKey=()=>encodeURIComponent((fbAuth.email||"").toLowerCase());
+async function fbPutRequest(name){
+  const f={email:{stringValue:(fbAuth.email||"").toLowerCase()},requestedAt:{stringValue:new Date().toISOString()}};if(name)f.name={stringValue:name};
+  const r=await fbFetch("/"+COL_R+"/"+emKey()+"?"+Object.keys(f).map(k=>"updateMask.fieldPaths="+k).join("&"),{method:"PATCH",body:JSON.stringify({fields:f})});
+  return r.ok}
+let reqSent=false;
 async function fbToken(){
   if(!fbAuth)throw Object.assign(new Error("signed-out"),{status:401});
   if(Date.now()<fbAuth.exp)return fbAuth.id;
@@ -766,16 +790,29 @@ async function fbCommit(msg,force){
 }
 const fbSaved=()=>setSave("Shared database · "+(fbAuth?fbAuth.email:""));
 async function fbSync(force){
-  try{const x=await fbPull(),sg=fbSig(x);
+  try{const x=await fbPull(),sg=fbSig(x);$("#pending").style.display="none";
     if(force||sg!==fbLastSig){const first=!fbLastSig;fbApply(x);render();if(first)renderPayOpts();
+      $("#pending").style.display="none";reqSent=false;
       if(!x.cfgRaw&&!Object.keys(x.raw).length)setSave("Shared database is empty – an administrator can import the starting bookings (Table Setup → Backup & import)");else fbSaved()}
   }catch(e){
     if(e.status===401){showLogin();setSave("Signed out")}
-    else if(e.status===403){setSave("Not allowed");toast(e.message)}
+    else if(e.status===403){setSave("Waiting for approval");showPending()}
     else setSave("Cannot reach the shared database – retrying…");
   }
 }
-function showLogin(){clearInterval(fbPollT);$("#login").style.display="flex";$("#lgErr").textContent="";setTimeout(()=>($("#lgEmail").value?$("#lgPw"):$("#lgEmail")).focus(),50)}
+async function showPending(){
+  $("#login").style.display="none";$("#pending").style.display="flex";
+  $("#pendMsg").textContent="Your account ("+(fbAuth?fbAuth.email:"")+") has been created. The administrator must approve it before you can see the reservations. This page checks automatically – you can also press Check again.";
+  if(!reqSent&&fbAuth){reqSent=true;try{await fbPutRequest("")}catch(e){reqSent=false}}
+}
+let lgMode="in",memBind=false;
+function setLgMode(m){lgMode=m;const up=m==="up";
+  $("#lgTitle").textContent=up?"Create your account":"Member sign-in";
+  $("#lgHint").textContent=up?"Enter your name, email and a password (at least 6 characters). The administrator will approve your account before you can open the reservations.":"Gala Dinner reservations are private. Sign in with your own email and password.";
+  $("#lgNameRow").style.display=up?"":"none";$("#lgPw2Row").style.display=up?"":"none";
+  $("#lgGo").textContent=up?"Create account":"Sign in";$("#lgSwap").textContent=up?"I already have an account – Sign in":"New here? Create an account";
+  $("#lgPw").autocomplete=up?"new-password":"current-password";$("#lgErr").textContent="";$("#lgErr").style.color="var(--red)"}
+function showLogin(){clearInterval(fbPollT);$("#pending").style.display="none";$("#login").style.display="flex";$("#lgErr").textContent="";setTimeout(()=>($("#lgEmail").value?$("#lgPw"):$("#lgEmail")).focus(),50)}
 async function fbStart(){
   $("#login").style.display="none";$("#signout").style.display="";
   setSave("Connecting to the shared database…");
@@ -783,16 +820,45 @@ async function fbStart(){
   clearInterval(fbPollT);fbPollT=setInterval(()=>{if(!saving&&!document.hidden)fbSync(false)},10000);
   document.addEventListener("visibilitychange",()=>{if(!document.hidden&&fbAuth&&!saving)fbSync(false)});
 }
+const lgMsg=(t,ok)=>{const e=$("#lgErr");e.textContent=t;e.style.color=ok?"var(--green,#1b7a3a)":"var(--red)"};
+const authErr=m=>/INVALID_LOGIN|INVALID_PASSWORD|EMAIL_NOT_FOUND|INVALID_EMAIL/.test(m)?"Wrong email or password.":/EMAIL_EXISTS/.test(m)?"That email already has an account – use Sign in.":/WEAK_PASSWORD/.test(m)?"Password must be at least 6 characters.":/TOO_MANY/.test(m)?"Too many attempts – wait a few minutes.":"Could not continue: "+m;
 async function tryLogin(){
-  const em=$("#lgEmail").value.trim(),pw=$("#lgPw").value;if(!em||!pw){$("#lgErr").textContent="Enter the staff email and password.";return}
-  $("#lgGo").disabled=true;$("#lgErr").textContent="";
-  try{await fbSignIn(em,pw);$("#lgPw").value="";await fbStart()}
-  catch(e){const m=String(e.message||e);$("#lgErr").textContent=/INVALID|EMAIL_NOT_FOUND|PASSWORD/.test(m)?"Wrong email or password.":/TOO_MANY/.test(m)?"Too many attempts – wait a few minutes.":"Could not sign in: "+m}
+  const em=$("#lgEmail").value.trim().toLowerCase(),pw=$("#lgPw").value,up=lgMode==="up";
+  if(!em||!pw){lgMsg("Enter your email and password.");return}
+  if(up){const nm=$("#lgName").value.trim();if(!nm){lgMsg("Enter your full name.");return}if(pw.length<6){lgMsg("Password must be at least 6 characters.");return}if(pw!==$("#lgPw2").value){lgMsg("The two passwords do not match.");return}}
+  $("#lgGo").disabled=true;lgMsg("");
+  try{if(up)await fbSignUp(em,pw,$("#lgName").value.trim());else await fbSignIn(em,pw);
+    $("#lgPw").value="";$("#lgPw2").value="";setLgMode("in");await fbStart()}
+  catch(e){lgMsg(authErr(String(e.message||e)))}
   $("#lgGo").disabled=false;
+}
+async function memLoad(){
+  const box=$("#memList");$("#memSec").style.display="";box.textContent="Loading…";
+  try{const [rq,mb]=await Promise.all([fbList(COL_R),fbList(COL_M)]);
+    const id=d=>decodeURIComponent(d.name.split("/").pop());
+    const fv=(d,k)=>d.fields&&d.fields[k]&&d.fields[k].stringValue||"";
+    const members=new Set(mb.map(id));
+    const pend=rq.filter(d=>!members.has(id(d)));
+    let h="<b>Waiting for approval ("+pend.length+")</b>";
+    h+=pend.length?pend.map(d=>`<div class="btns" style="align-items:center;margin:6px 0"><span style="flex:1">${esc(fv(d,"name")||"(no name)")} · ${esc(id(d))}</span><button class="b pri" type="button" data-ap="${esc(id(d))}" data-nm="${esc(fv(d,"name"))}">Approve</button><button class="b ghost" type="button" data-dec="${esc(id(d))}">Decline</button></div>`).join(""):"<div style='margin:6px 0'>No one is waiting.</div>";
+    h+="<br><b>Approved members ("+mb.length+")</b>";
+    h+=mb.length?mb.map(d=>`<div class="btns" style="align-items:center;margin:6px 0"><span style="flex:1">${esc(fv(d,"name")||"")} ${esc(fv(d,"name")?"· ":"")}${esc(id(d))}</span><button class="b ghost" type="button" data-rm="${esc(id(d))}">Remove</button></div>`).join(""):"<div style='margin:6px 0'>No approved members yet.</div>";
+    box.innerHTML=h;
+    box.querySelectorAll("[data-ap]").forEach(b=>b.onclick=async()=>{b.disabled=true;try{const r=await fbFetch("/"+COL_M+"/"+encodeURIComponent(b.dataset.ap),{method:"PATCH",body:JSON.stringify({fields:{email:{stringValue:b.dataset.ap},name:{stringValue:b.dataset.nm||""},approvedAt:{stringValue:new Date().toISOString()}}})});if(!r.ok)throw new Error(r.status);await fbFetch("/"+COL_R+"/"+encodeURIComponent(b.dataset.ap),{method:"DELETE"});toast("Approved");memLoad()}catch(e){toast("Could not approve: "+(e.message||e));b.disabled=false}});
+    const del=(col,k,msg)=>async()=>{try{const r=await fbFetch("/"+col+"/"+encodeURIComponent(k),{method:"DELETE"});if(!r.ok&&r.status!==404)throw new Error(r.status);toast(msg);memLoad()}catch(e){toast("Could not update: "+(e.message||e))}};
+    box.querySelectorAll("[data-dec]").forEach(b=>b.onclick=del(COL_R,b.dataset.dec,"Declined"));
+    box.querySelectorAll("[data-rm]").forEach(b=>b.onclick=()=>confirmBox("Remove access?",b.dataset.rm+" will no longer be able to open the reservations.","Yes, remove",del(COL_M,b.dataset.rm,"Access removed")));
+  }catch(e){box.textContent=e.status===403?"Only the main administrator account can approve members. Sign out and sign in with that account.":"Could not load the member list: "+(e.message||e)}
 }
 if(FB){
   $("#saveState").insertAdjacentHTML("afterend",' <a href="#" id="signout" style="display:none;color:#f3d58e;font-size:12px;margin-left:8px">Sign out</a>');
-  $("#lgGo").onclick=tryLogin;$("#lgPw").addEventListener("keydown",e=>{if(e.key==="Enter")tryLogin()});
+  $("#lgGo").onclick=tryLogin;[$("#lgPw"),$("#lgPw2"),$("#lgName"),$("#lgEmail")].forEach(i=>i.addEventListener("keydown",e=>{if(e.key==="Enter")tryLogin()}));
+  $("#lgSwap").onclick=e=>{e.preventDefault();setLgMode(lgMode==="up"?"in":"up")};
+  $("#lgForgot").onclick=async e=>{e.preventDefault();const em=$("#lgEmail").value.trim();if(!em){lgMsg("Type your email above first, then press Forgot password.");return}
+    try{await idt("sendOobCode",{requestType:"PASSWORD_RESET",email:em});lgMsg("If that email has an account, a reset link has been sent. Check your inbox and spam.",true)}catch(x){lgMsg(authErr(String(x.message||x)))}};
+  $("#pendCheck").onclick=()=>fbSync(true);
+  $("#pendOut").onclick=()=>$("#signout").click();
+  $("#memRefresh").onclick=memLoad;
   $("#signout").onclick=e=>{e.preventDefault();saveAuth(null);clearInterval(fbPollT);S.res={};render();$("#signout").style.display="none";setSave("Signed out");showLogin()};
 }
 /* backup / import (works in both modes) */

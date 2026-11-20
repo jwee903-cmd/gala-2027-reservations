@@ -1,12 +1,23 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Only the listed staff sign-in(s) may read or write Gala Dinner data. Everything else is closed.
-    function staff() {
-      return request.auth != null
-        && request.auth.token.email in ['galastaff@example.com'];
+    function signedIn() { return request.auth != null; }
+    // Main administrator account(s): can approve members. Add more emails here.
+    function admin() { return signedIn() && request.auth.token.email in ['galastaff@example.com']; }
+    // Members = people the administrator approved in Table Setup > Member access.
+    function member() { return signedIn() && exists(/databases/$(database)/documents/gala2027_members/$(request.auth.token.email)); }
+
+    match /gala2027_bookings/{id} { allow read, write: if admin() || member(); }
+    match /gala2027_config/{id}   { allow read, write: if admin() || member(); }
+
+    // Anyone with an account may file (or refresh) a request under their own email only.
+    match /gala2027_requests/{email} {
+      allow create, update: if signedIn() && request.auth.token.email == email;
+      allow read, delete: if admin();
     }
-    match /gala2027_bookings/{id} { allow read, write: if staff(); }
-    match /gala2027_config/{id}   { allow read, write: if staff(); }
+    match /gala2027_members/{email} {
+      allow read: if admin() || (signedIn() && request.auth.token.email == email);
+      allow write: if admin();
+    }
   }
 }
