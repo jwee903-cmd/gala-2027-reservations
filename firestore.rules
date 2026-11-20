@@ -3,7 +3,7 @@ service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
     // Main administrator account(s): can approve members. Add more emails here.
-    function admin() { return signedIn() && request.auth.token.email in ['galastaff@example.com']; }
+    function admin() { return signedIn() && request.auth.token.email in ['resergala@spring.com']; }
     // Members = people the administrator approved in Table Setup > Member access.
     function member() { return signedIn() && exists(/databases/$(database)/documents/gala2027_members/$(request.auth.token.email)); }
 
