@@ -117,11 +117,10 @@ const W=1536,H=1024;
 const POS={
  A:[[268,483],[358,483],[452,483],[268,558],[358,558],[452,558],[267,640],[358,640],[453,640],[266,718],[359,718],[453,718]],
  B:[[592,483],[682,483],[771,483],[592,560],[682,560],[771,560],[591,641],[682,641],[772,641],[592,719],[682,719],[772,719]],
- C:[[903,481],[991,481],[1079,481],[904,557],[993,557],[1084,557],[907,640],[1000,640],[1091,640],[911,718],[1005,718],[1100,718]],
- E:[[1194,745]]   // extra 2-seat table on the free sand beside Section C (not part of the original graphic)
+ C:[[903,481],[991,481],[1079,481],[904,557],[993,557],[1084,557],[907,640],[1000,640],[1091,640],[911,718],[1005,718],[1100,718]]
 };
 const TABLES=[];
-for(const s of ["A","B","C","E"]) POS[s].forEach((p,i)=>TABLES.push({id:s+String(i+1).padStart(2,"0"),sec:s,x:p[0],y:p[1]}));
+for(const s of ["A","B","C"]) POS[s].forEach((p,i)=>TABLES.push({id:s+String(i+1).padStart(2,"0"),sec:s,x:p[0],y:p[1]}));
 const SEC_COL={A:"#3b5bdb",B:"#c2255c",C:"#2b8a3e",E:"#d9b25f"};
 const SEC_NAME={A:"Section A",B:"Section B",C:"Section C",E:"Extra table"};
 
@@ -131,7 +130,6 @@ const SEC_NAME={A:"Section A",B:"Section B",C:"Section C",E:"Extra table"};
 const DEFAULT_CAP={};
 TABLES.forEach(t=>DEFAULT_CAP[t.id]=6);
 ["A12","B12","C07","C08","C09","C10","C11","C12"].forEach(id=>DEFAULT_CAP[id]=4);
-DEFAULT_CAP.E01=2;
 
 /* ---------- state ---------- */
 const FB=(window.GALA_FB&&window.GALA_FB.projectId&&window.GALA_FB.apiKey)?window.GALA_FB:null;   // set by firebase-config.js on the GitHub Pages copy
@@ -145,7 +143,7 @@ S.updated=S.updated||"";
 /* Administrator PIN for the Table Setup page (stored as a salted SHA-256 hash, never as plain text) */
 const ADMIN_SALT="gala2027|",DEFAULT_ADMIN_HASH="e79b5d05f8cd71c6a5779013b173bcaa070c41db3d21555ac10795aac19d278e";
 S.adminHash=S.adminHash||DEFAULT_ADMIN_HASH;
-S.seatTotal=(+S.seatTotal>0)?+S.seatTotal:200;   // locked pool of seats shared by ALL tables: Sections A, B, C and the extra table E01
+S.seatTotal=(+S.seatTotal>0)?+S.seatTotal:200;   // locked pool of seats shared by ALL tables: Sections A, B and C
 let unlocked=false;
 const manual=new Set();   // tables the administrator typed into since the last save (auto-balance leaves these alone)
 async function sha(p){if(!(window.crypto&&crypto.subtle))throw new Error("no-crypto");
@@ -176,7 +174,7 @@ document.body.insertAdjacentHTML("afterbegin",`
 <header>
  <div><h1>Magic New Year 2027 · Gala Dinner</h1><div class="sub">Springfield @ Sea · Beach Event Table Reservations <span class="save" id="saveState">Loading…</span></div></div>
  <nav>
-  <a href="#floor" data-v="floor">Floor Plan</a>
+  <a href="#floor" data-v="floor">Table Plan</a>
   <a href="#booking" data-v="booking">Reservation</a>
   <a href="#summary" data-v="summary">Summary</a>
   <a href="#register" data-v="register">Guest Register</a>
@@ -197,7 +195,7 @@ document.body.insertAdjacentHTML("afterbegin",`
  <section class="view" id="v-booking">
   <div class="card">
    <h2 id="fTitle">New Reservation</h2>
-   <p class="hint" id="fHint">Pick a table on the floor plan or choose one below. Saving marks the table as reserved on the map straight away.</p>
+   <p class="hint" id="fHint">Pick a table on the table plan or choose one below. Saving marks the table as reserved on the map straight away.</p>
    <form id="form" autocomplete="off">
     <h3 class="sh">Booking</h3>
     <div class="grid">
@@ -249,7 +247,7 @@ document.body.insertAdjacentHTML("afterbegin",`
      <button class="b pri" type="submit" id="fSave">Save reservation</button>
      <button class="b ghost" type="button" id="fNew">Clear form</button>
      <button class="b danger" type="button" id="fCancel" style="display:none">Cancel reservation (release table)</button>
-     <button class="b ghost" type="button" id="fMap">Back to floor plan</button>
+     <button class="b ghost" type="button" id="fMap">Back to table plan</button>
     </div>
    </form>
   </div>
@@ -292,7 +290,7 @@ document.body.insertAdjacentHTML("afterbegin",`
    <div class="toolbar" style="justify-content:space-between"><span class="tbadge st-av">Administrator mode</span><button class="b ghost" type="button" id="adminLockBtn">Lock now</button></div>
    <h2>Table Setup</h2>
    <p class="hint">The total number of seats is locked, set any table to any number from <b>0 to 100</b> seats. The page only tracks how many seats are left out of the total. Use 0 for a table that is booked together with another table (for example C09 + C12). The extra table E01 is counted in the total.</p>
-   <div class="toolbar"><span><b>Total seats (Sections A, B, C and E01) – locked at</b></span><input id="seatTotal" type="number" min="1" value="200" style="width:90px!important;padding:5px 7px"></div>
+   <div class="toolbar"><span><b>Total seats (Sections A, B and C) – locked at</b></span><input id="seatTotal" type="number" min="1" value="200" style="width:90px!important;padding:5px 7px"></div>
    <div class="seatbar" id="seatBar"></div>
    <div class="toolbar"><span>Set all seats in</span>
     <select id="bulkSec"><option value="ALL">All sections</option><option>A</option><option>B</option><option>C</option></select>
@@ -398,7 +396,7 @@ function badgeClass(s){s=(s||"").toLowerCase();if(s.includes("full")||s.includes
 /* ---------- render ---------- */
 function stats(){
   const o={tot:TABLES.length,res:0,hold:0,av:0,seats:0,guests:0,pend:0,pendGuests:0,sec:{}};
-  ["A","B","C","E"].forEach(s=>o.sec[s]={tot:0,res:0,hold:0,av:0,seats:0,guests:0});
+  ["A","B","C"].forEach(s=>o.sec[s]={tot:0,res:0,hold:0,av:0,seats:0,guests:0});
   TABLES.forEach(t=>{const r=S.res[t.id],s=o.sec[t.sec];s.tot++;s.seats+=+S.cap[t.id];
     if(!r){o.av++;s.av++}else{r.status==="hold"?(o.hold++,s.hold++):(o.res++,s.res++);o.guests+=pax(r);s.guests+=pax(r)}});
   o.seats+=S.seatTotal;
@@ -430,7 +428,7 @@ function render(){
 function renderSummary(st){
   st=st||stats();
   $("#sumHint").textContent=`${st.res} reserved, ${st.hold} on hold and ${st.av} available out of ${st.tot} tables · ${st.guests+st.pendGuests} guests booked of ${st.seats} seats (${st.guests} at tables${st.pend?`, ${st.pendGuests} awaiting a table`:""}) · ${st.seats-st.guests-st.pendGuests} seats left`+(S.updated?` · last saved ${new Date(S.updated).toLocaleString("en-GB")}`:"");
-  $("#secs").innerHTML=["A","B","C","E"].map(s=>{const x=st.sec[s],p=x.tot?Math.round((x.res+x.hold)/x.tot*100):0;
+  $("#secs").innerHTML=["A","B","C"].map(s=>{const x=st.sec[s],p=x.tot?Math.round((x.res+x.hold)/x.tot*100):0;
     return `<div class="secbox" style="border-top:4px solid ${SEC_COL[s]}"><h3>${SEC_NAME[s]}</h3>
      <div style="font-size:13px">${x.res} reserved · ${x.hold} hold · <b style="color:var(--green)">${x.av} available</b> · ${x.guests}/${x.seats} guests</div>
      <div class="bar"><i style="width:${p}%;background:${SEC_COL[s]}"></i></div>
@@ -490,7 +488,7 @@ function renderRegister(){
   const head=`<tr><th>Booking<br>ID</th><th>Date<br>Booked</th><th>Guest / Group Name</th><th>Phone / Contact</th><th>Email</th><th>Booking<br>Channel</th><th>Promotion / Rate</th>
    <th>Adults</th><th>Child<br>6–12</th><th>Under<br>6</th><th>Adult<br>Rate</th><th>Child<br>Rate</th><th>Gross<br>THB</th><th>Disc<br>%</th><th>Net<br>THB</th>
    <th>Deposit<br>THB</th><th>Balance<br>Due THB</th><th>Payment<br>Status</th><th>Table /<br>Zone</th><th>Dietary / Special Request</th><th>Remarks / Follow-up</th><th>Guest<br>Type</th><th>Room</th><th></th></tr>`;
-  const empty=`<tr><td colspan="24" style="text-align:center;color:var(--muted);padding:22px">No bookings yet — reserve a table from the Floor Plan (or use “None table” on the Reservation page) to see it listed here.</td></tr>`;
+  const empty=`<tr><td colspan="24" style="text-align:center;color:var(--muted);padding:22px">No bookings yet — reserve a table from the Table Plan (or use “None table” on the Reservation page) to see it listed here.</td></tr>`;
   const tot=rows.length?`<tr class="regtot"><td colspan="12" style="text-align:right">Totals (${rows.length} booking${rows.length===1?"":"s"})</td>
    <td style="text-align:right">${fmt(g)}</td><td></td><td style="text-align:right">${fmt(n)}</td><td style="text-align:right">${fmt(d)}</td>
    <td style="text-align:right">${fmt(bal)}</td><td colspan="6"></td></tr>`:"";
@@ -499,7 +497,7 @@ function renderRegister(){
 function renderSetup(){
   if(document.activeElement&&document.activeElement.classList.contains("cap"))return;
   manual.clear();
-  $("#capGrid").innerHTML=["A","B","C","E"].map(s=>`<div class="secbox" style="border-top:4px solid ${SEC_COL[s]}"><h3>${SEC_NAME[s]}<span id="secsum-${s}" style="font-weight:500;font-size:13px;color:var(--muted);margin-left:8px"></span></h3><div class="grid" style="grid-template-columns:repeat(3,1fr);gap:8px">`+
+  $("#capGrid").innerHTML=["A","B","C"].map(s=>`<div class="secbox" style="border-top:4px solid ${SEC_COL[s]}"><h3>${SEC_NAME[s]}<span id="secsum-${s}" style="font-weight:500;font-size:13px;color:var(--muted);margin-left:8px"></span></h3><div class="grid" style="grid-template-columns:repeat(3,1fr);gap:8px">`+
     TABLES.filter(t=>t.sec===s).map(t=>`<label style="text-transform:none">${t.id}<input class="cap" type="number" min="0" max="100" data-cap="${t.id}" value="${S.cap[t.id]}"></label>`).join("")+`</div></div>`).join("");
   $("#seatTotal").value=S.seatTotal;updateSeatBar();
 }
@@ -524,18 +522,18 @@ function addPayRow(v){
   $("#payOptList").appendChild(d);
 }
 function renderPayOpts(){$("#payOptList").innerHTML="";S.payOptions.forEach(addPayRow)}
-const NONE_HINT="No table assigned yet. The booking is saved and listed in Summary and Guest Register as “Awaiting table”; it does not block any table on the floor plan. When the guest confirms, open it and choose a table here.";
+const NONE_HINT="No table assigned yet. The booking is saved and listed in Summary and Guest Register as “Awaiting table”; it does not block any table on the table plan. When the guest confirms, open it and choose a table here.";
 const PEND_HINT="No table assigned yet. When the guest confirms, pick a table in the Table / Zone list and press the save button to assign it. Or cancel to remove this booking.";
 /* switch the Table/Zone list without discarding what has been typed (new form, or a pending booking being assigned) */
 function setHead(v){
   const none=v===NONE||isPend(v),pendEdit=editKey&&isPend(editKey);
   if(pendEdit){
     $("#fTitle").textContent=none?"Pending booking – no table yet":"Assign table "+v+" to this booking";
-    $("#fHint").textContent=none?PEND_HINT:`Table ${v} is available (${S.cap[v]} seats). Press “Assign table & save” – it turns red on the floor plan and leaves the awaiting list.`;
+    $("#fHint").textContent=none?PEND_HINT:`Table ${v} is available (${S.cap[v]} seats). Press “Assign table & save” – it turns red on the table plan and leaves the awaiting list.`;
     $("#fSave").textContent=none?"Update reservation":"Assign table & save";
   }else{
     $("#fTitle").textContent=none?"New Reservation – None table (awaiting confirmation)":"New Reservation – Table "+v;
-    $("#fHint").textContent=none?NONE_HINT:`Table ${v} is available (${S.cap[v]} seats). Saving marks it as reserved on the floor plan straight away.`;
+    $("#fHint").textContent=none?NONE_HINT:`Table ${v} is available (${S.cap[v]} seats). Saving marks it as reserved on the table plan straight away.`;
     $("#fSave").textContent=none?"Save without table":"Save reservation";
   }
 }
@@ -549,7 +547,7 @@ function fillForm(id){
     $("#f_paymentStatus").value=S.payOptions[0];$("#f_date").value=todayISO();$("#f_adultRate").value=S.lastRate.adult||"";$("#f_childRate").value=S.lastRate.child||"";
     $("#f_id").value="assigned on save";
     $("#fTitle").textContent=id===NONE?"New Reservation – None table (awaiting confirmation)":"New Reservation – Table "+id;
-    $("#fHint").textContent=id===NONE?NONE_HINT:`Table ${id} is available (${S.cap[id]} seats). Saving marks it as reserved on the floor plan straight away.`;$("#fCancel").style.display="none";$("#fSave").textContent=id===NONE?"Save without table":"Save reservation";}
+    $("#fHint").textContent=id===NONE?NONE_HINT:`Table ${id} is available (${S.cap[id]} seats). Saving marks it as reserved on the table plan straight away.`;$("#fCancel").style.display="none";$("#fSave").textContent=id===NONE?"Save without table":"Save reservation";}
   updateCalc();
 }
 function updateCalc(){
@@ -630,7 +628,7 @@ function updateSeatBar(){
   const total=Math.max(0,Math.floor(+$("#seatTotal").value)||0),ins=poolInputs();
   const alloc=ins.reduce((a,i)=>a+seatNum(i),0),rem=total-alloc;
   const dirty=ins.filter(i=>manual.has(i.dataset.cap));
-  ["A","B","C","E"].forEach(x=>{const el=$("#secsum-"+x);if(el)el.textContent="· "+$$("[data-cap]").filter(i=>i.dataset.cap[0]===x).reduce((a,i)=>a+seatNum(i),0)+" seats"});
+  ["A","B","C"].forEach(x=>{const el=$("#secsum-"+x);if(el)el.textContent="· "+$$("[data-cap]").filter(i=>i.dataset.cap[0]===x).reduce((a,i)=>a+seatNum(i),0)+" seats"});
   const col=rem<0?"var(--red)":rem===0?"var(--green)":"#8a5a00";
   let h=`<div><b>Total seats: ${total}</b> &nbsp;·&nbsp; Set on tables: <b>${alloc}</b> &nbsp;·&nbsp; <span style="font-size:16px">Seats left: <b style="color:${col}">${rem}</b></span></div>`;
   if(rem<0)h+=`<div style="color:var(--red);font-weight:600">${-rem} seat${rem===-1?"":"s"} more than the total.</div>`;
